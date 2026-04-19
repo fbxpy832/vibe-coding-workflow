@@ -49,6 +49,32 @@ created: 2026-04-19
 
 Models are tools. Pick the right tool for the job — don't force every project through the full pipeline.
 
+## ⚠️ Pitfalls（必须避免）
+
+### Codex review 命令语法
+**禁止这样用：**
+\`\`\`bash
+codex review --uncommitted '<prompt>'
+\`\`\`
+这会报 `the argument '--uncommitted' cannot be used with '[PROMPT]'`，因为 `--uncommitted` 和 `<PROMPT>` 互相排斥。
+
+**正确用法（两选一）：**
+
+**Mode A — 无额外提示（推荐）：**
+\`\`\`bash
+codex review --uncommitted
+\`\`\`
+
+**Mode B — 有额外提示：**
+\`\`\`bash
+git diff -- . | codex exec - "Review this diff. Focus on <extra context>. Return only concrete findings."
+\`\`\`
+
+### 通用规则
+- Codex 只用于 review，不用于写代码
+- Qwen 3.6 Plus 是主写模型，Codex 是复核模型
+- 所有代码必须等用户确认 Plan 后才能执行
+
 ---
 
 ## Model Roles
@@ -113,8 +139,8 @@ codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 # Codex 增量复核（只 review 改动的文件）
 codex review --uncommitted
 
-# Codex 全量复核（必要时）
-codex review --uncommitted 'Review all changes. Check logic, security, style.'
+# 全量复核（Codex，Mode A，必要时）
+codex review --uncommitted
 ```
 
 ---
@@ -168,11 +194,11 @@ opencode run '写核心：[子任务]' --model opencode-go/minimax-m2.7
 # OpenCode 耗尽时，切换 Codex 主写
 codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 
-# 增量复核（Codex）
+# 增量复核（Codex，Mode A）
 codex review --uncommitted
 
-# 全量最终审核（Codex）
-codex review --uncommitted 'Review all changes. Run tests. Commit if solid.'
+# 全量最终审核（Codex，Mode A）
+codex review --uncommitted
 ```
 
 ### 并行主写
@@ -256,14 +282,14 @@ opencode run '写核心：[子任务]' --model opencode-go/minimax-m2.7
 # OpenCode 耗尽时，切换 Codex 主写
 codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 
-# 中期复核（Codex，增量 review）
-codex review --uncommitted 'Mid-point review. Check architecture, logic, security.'
+# 中期复核（Codex，Mode A）
+codex review --uncommitted
 
-# 修复验证（Codex）
-codex review --uncommitted 'Verify fixes from previous review.'
+# 修复验证（Codex，Mode A）
+codex review --uncommitted
 
-# 最终审核（Codex，唯一审核模型，全量 review）
-codex review --uncommitted 'Final review. Check all changes, run tests, verify regressions.'
+# 最终审核（Codex，Mode A，全量）
+codex review --uncommitted
 ```
 
 ---
