@@ -69,7 +69,10 @@ codex review --uncommitted
 \`\`\`bash
 git diff HEAD -- . | codex exec - "Review this diff. Focus on <extra context>. Return only concrete findings."
 \`\`\`
-注意：`git diff HEAD` 覆盖 staged + unstaged 改动，不包括未跟踪文件。
+注意：
+- 用管道传 diff 内容，**不要**用 `codex exec - < file`（stdin 方式 Codex 不接受）
+- `git diff HEAD` 覆盖 staged + unstaged，不包括未跟踪文件
+- review 结果只展示，不自动写入文件（sandbox 有 workspace-write 权限但不要依赖它）
 
 ### 通用规则
 - Codex 只用于 review，不用于写代码
