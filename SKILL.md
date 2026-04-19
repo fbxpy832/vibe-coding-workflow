@@ -65,10 +65,11 @@ codex review --uncommitted '<prompt>'
 codex review --uncommitted
 \`\`\`
 
-**Mode B — 有额外提示：**
+**Mode B — 有额外提示（覆盖 staged + unstaged）：**
 \`\`\`bash
-git diff -- . | codex exec - "Review this diff. Focus on <extra context>. Return only concrete findings."
+git diff HEAD -- . | codex exec - "Review this diff. Focus on <extra context>. Return only concrete findings."
 \`\`\`
+注意：`git diff HEAD` 覆盖 staged + unstaged 改动，不包括未跟踪文件。
 
 ### 通用规则
 - Codex 只用于 review，不用于写代码
@@ -139,7 +140,7 @@ codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 # Codex 增量复核（只 review 改动的文件）
 codex review --uncommitted
 
-# 全量复核（Codex，Mode A，必要时）
+# 全量复核（Codex，最终阶段，Mode A）
 codex review --uncommitted
 ```
 
@@ -288,7 +289,7 @@ codex review --uncommitted
 # 修复验证（Codex，Mode A）
 codex review --uncommitted
 
-# 最终审核（Codex，Mode A，全量）
+# 最终审核（Codex，Mode A）
 codex review --uncommitted
 ```
 
