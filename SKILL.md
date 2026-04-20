@@ -1,6 +1,6 @@
 ---
 name: vibe-coding-workflow
-description: Multi-model vibe coding workflow with 3 levels (Lite / Standard / Strict). User picks level, Hermes writes plan, models execute in sequence, Codex reviews. No execution before user confirms plan.
+description: Multi-model vibe coding workflow with 3 levels (Lite / Standard / Strict). User picks level, Hermes writes plan, models execute in sequence, Codex reviews. No execution before user confirms plan. Codex may take over implementation only when the primary writer is unavailable.
 author: Hermes
 tags:
   - vibe-coding
@@ -34,11 +34,11 @@ created: 2026-04-19
 输入序号或说『1』『2』选择。
 ```
 
-**超时机制（5 分钟）：**
+**路径选择等待策略：**
 
-用户 5 分钟内无响应，Hermes 根据经验判断：
+如果用户暂未选择路径，Hermes 可以给出默认建议，但不要把它伪装成已经得到用户确认：
 
-| 需求特征 | 自动选择 |
+| 需求特征 | 默认建议 |
 |---------|---------|
 | 提到 fix/hotfix/patch/bug | 直达模式 |
 | 提到 重构/架构/重构/大规模 | 拆解模式 |
@@ -71,12 +71,13 @@ git diff HEAD -- . | codex exec - "Review this diff. Focus on <extra context>. R
 \`\`\`
 注意：
 - 用管道传 diff 内容，**不要**用 `codex exec - < file`（stdin 方式 Codex 不接受）
-- `git diff HEAD` 覆盖 staged + unstaged，不包括未跟踪文件
+- `git diff HEAD` 覆盖 staged + unstaged，不包括未跟踪文件；如果本次改动新增了文件，优先使用 `codex review --uncommitted`
 - review 结果只展示，不自动写入文件（sandbox 有 workspace-write 权限但不要依赖它）
 
 ### 通用规则
-- Codex 只用于 review，不用于写代码
-- Qwen 3.6 Plus 是主写模型，Codex 是复核模型
+- 默认情况下，Codex 用于 review，不承担主写职责
+- Qwen 3.6 Plus 是默认主写模型，Codex 是默认复核模型
+- 仅当 OpenCode 不可用或额度耗尽时，Codex 才接管主写
 - 所有代码必须等用户确认 Plan 后才能执行
 
 ---
@@ -89,7 +90,7 @@ git diff HEAD -- . | codex exec - "Review this diff. Focus on <extra context>. R
 | **Qwen 3.6 Plus** | Plan 写作 + 主写（样板 + 核心模块） | Level 1+，OpenCode 额度充足 |
 | **Codex CLI 0.121** | 复核 + 审核 + 备用主写 | 全部级别；OpenCode 耗尽时接管主写 |
 
-> **复核 ≠ 主写。** Qwen 3.6 Plus 负责写代码，Codex 负责复核和审核。额度耗尽时 Codex 接管主写，两者合并。
+> **默认分工：复核 ≠ 主写。** Qwen 3.6 Plus 负责写代码，Codex 负责复核和审核。只有在 OpenCode 不可用或额度耗尽时，Codex 才接管主写，两者职责临时合并。
 
 ### 额度切换规则（按顺序 fallback）
 
@@ -140,11 +141,11 @@ opencode run '[子任务]' --model opencode-go/minimax-m2.7
 # OpenCode 耗尽时，切换 Codex 主写
 codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 
-# Codex 增量复核（只 review 改动的文件）
+# Codex 增量复核（当前工作区未提交改动）
 codex review --uncommitted
 
-# 全量复核（Codex，最终阶段，Mode A）
-codex review --uncommitted
+# 全量最终审核（相对默认分支）
+codex review --base "$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
 ```
 
 ---
@@ -198,33 +199,37 @@ opencode run '写核心：[子任务]' --model opencode-go/minimax-m2.7
 # OpenCode 耗尽时，切换 Codex 主写
 codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 
-# 增量复核（Codex，Mode A）
+# 增量复核（当前工作区未提交改动）
 codex review --uncommitted
 
-# 全量最终审核（Codex，Mode A）
-codex review --uncommitted
+# 全量最终审核（相对默认分支）
+codex review --base "$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
 ```
 
 ### 并行主写
 
-Level 2+ 可选并行模式（无依赖模块时启用）。每个并行任务在独立 branch 上工作：
+Level 2+ 可选并行模式（无依赖模块时启用）。每个并行任务必须在独立 worktree 或独立仓库副本中工作，不要在同一个工作目录里后台并行改代码：
 
 ```bash
-# 创建独立 branch
-git checkout -b feature/module-a
+# 为不同模块创建独立 worktree
+git worktree add ../module-a -b feature/module-a
+git worktree add ../module-b -b feature/module-b
 
-# 并行写两个独立模块
-opencode run '写模块 A：[子任务 A]' --model opencode-go/qwen3.6-plus &
-opencode run '写模块 B：[子任务 B]' --model opencode-go/qwen3.6-plus &
+# 在各自 worktree 中分别执行
+cd ../module-a
+opencode run '写模块 A：[子任务 A]' --model opencode-go/qwen3.6-plus
 
-# 两个都完成后，切换回 main，Codex 复核
-git checkout main
-codex review --uncommitted
+cd ../module-b
+opencode run '写模块 B：[子任务 B]' --model opencode-go/qwen3.6-plus
+
+# 合并前分别 review，再回到主仓库合并
+cd -
+codex review --base "$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
 ```
 
 **适用场景**：模块之间无依赖、可独立开发的功能
-**不适用**：有共享类型/接口的模块（串行更安全）
-**合并前**：必须通过 Codex 复核才能合并
+**不适用**：有共享类型/接口的模块，或需要频繁同步共享上下文的模块
+**合并前**：每个分支必须先完成自检和 Codex review，再执行 merge
 
 ---
 
@@ -286,14 +291,14 @@ opencode run '写核心：[子任务]' --model opencode-go/minimax-m2.7
 # OpenCode 耗尽时，切换 Codex 主写
 codex exec --full-auto 'Write code for: [任务]. Implement fully.'
 
-# 中期复核（Codex，Mode A）
+# 中期复核（当前工作区未提交改动）
 codex review --uncommitted
 
-# 修复验证（Codex，Mode A）
+# 修复验证（当前工作区未提交改动）
 codex review --uncommitted
 
-# 最终审核（Codex，Mode A）
-codex review --uncommitted
+# 最终审核（相对默认分支）
+codex review --base "$(git symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')"
 ```
 
 ---
@@ -313,6 +318,7 @@ opencode stats
 - OpenCode 额度耗尽时，Codex 接管主写（复核职责合并）
 - Codex 额度也耗尽时，Hermes 使用内置 MiniMax Provider 完成剩余工作
 - 每次切换时通知用户
+- 如果无法可靠读取额度信息，就显式告知用户当前采用的模型，不要假装已经完成检查
 
 ---
 
@@ -338,17 +344,17 @@ opencode stats
 3. **重新发送审核** → 重复 Plan 审核格式
 4. **循环直到用户满意或中止**
 
-**Plan 审核超时（5 分钟）：**
+**Plan 审核等待策略：**
 
-用户 5 分钟内无确认，Hermes 评估风险：
+如果一段时间内未收到确认，Hermes 只做提醒，不自动执行代码。可以按风险等级给出下一步建议：
 
-|| 情况 | 处理方式 |
+| 情况 | 处理方式 |
 |------|---------|
-| 低风险改动（Level 1） | 发送提醒，告知用户当前状态，等待决策 |
-| 中高风险改动（Level 2+） | 发送提醒，延长 3 分钟，仍无响应则中止并通知 |
-| 阻塞性问题 | 立即停止，保留改动，通知用户 |
+| 低风险改动（Level 1） | 发送提醒，告知用户当前状态，继续等待 |
+| 中高风险改动（Level 2+） | 发送提醒，说明尚未执行，等待用户确认 |
+| 阻塞性问题 | 明确说明阻塞原因，暂停任务，等待用户决策 |
 
-**超时期间不执行任何代码。**
+**等待期间不执行任何代码。**
 
 ### Review 反馈循环
 
@@ -363,15 +369,15 @@ Codex 复核失败时：
 
 **注意**：阻塞性问题（安全漏洞、数据丢失风险）必须修复，不能跳过。
 
-**Review 反馈超时（5 分钟）：**
+**Review 反馈等待策略：**
 
-Codex 复核失败时，用户 5 分钟内无决策：
+Codex 复核失败而用户暂未决策时：
 
-|| 问题严重程度 | 处理方式 |
+| 问题严重程度 | 处理方式 |
 |------------|---------|
 | 阻塞性问题（安全漏洞、数据丢失风险） | 立即停止，保留改动，通知用户，**不自动回滚** |
-| 建议修改（非阻塞） | 等待用户决策，超时则中止并记录 |
-| Level 3 严格审查 | 强制停止，保留改动，通知用户 |
+| 建议修改（非阻塞） | 等待用户决策，并明确当前风险 |
+| Level 3 严格审查 | 暂停后续步骤，等待用户明确放行 |
 
 **禁止自动回滚。** 回滚是破坏性操作，必须由用户明确授权。
 
@@ -379,7 +385,7 @@ Codex 复核失败时，用户 5 分钟内无决策：
 
 ## Project Path
 
-> 获取方式：`pwd`（当前工作目录）或 `git rev-parse --show-toplevel`
+> 获取方式：优先使用 `git rev-parse --show-toplevel`，不在 git 仓库中时再用 `pwd`
 
 执行 vibe-coding 任务前，通过 `cd [项目路径]` 切换到目标仓库根目录。
 
@@ -387,7 +393,7 @@ Codex 复核失败时，用户 5 分钟内无决策：
 
 ## What Hermes Never Does
 
-- ❌ Does NOT arbitrarily read files from the git repo without specific purpose
+- ❌ Does NOT read files aimlessly or exhaustively without a task-specific reason
 - ❌ Does NOT skip the review step
 - ❌ Does NOT commit without Codex review approval
 - ❌ **Does NOT execute any Plan before user explicitly confirms**
